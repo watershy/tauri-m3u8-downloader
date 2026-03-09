@@ -1,0 +1,47 @@
+[package]
+name = "m3u8-downloader"
+version = "0.1.0"
+description = "A custom M3U8 video downloader"
+authors = ["you"]
+license = ""
+repository = ""
+default-run = "m3u8-downloader"
+edition = "2021"
+rust-version = "1.60"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+tauri-build = { version = "1.5.1", features = [] }
+
+[dependencies]
+serde_json = { version = "1.0" }
+uuid = { version = "1", features = ["v4"] }
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "1.6", features = [ "process-exit", "path-all", "window-close", "shell-sidecar", "dialog-all", "fs-read-file", "fs-write-file", "http-all"] }
+reqwest = { version = "0.12", features = ["gzip", "deflate", "brotli", "json", "stream"] }
+tokio = { version = "1", features = ["full"] }
+url = { version = "2.5" }
+base64 = { version = "0.13" }
+webbrowser = { version = "1" }
+lazy_static = { version = "1" }
+subprocess = { version = "0.2" }
+array-init = { version = "2.0" }
+zstd = { version = "0.13" }
+open = { version = "5" }
+futures-util = { version = "0.3" }
+log = { version = "0.4" }
+tracing  = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = { version = "0.2" }
+chrono = { version = "0.4" }
+directories = { version = "5.0" }
+tokio-util = { version = "0.7", features = ["full"] } 
+dashmap = { version = "5.5" }
+rodio = { version = "0.17" }
+
+[features]
+# this feature is used for production builds or when `devPath` points to the filesystem and the built-in dev server is disabled.
+# If you use cargo directly instead of tauri's cli you can use this feature flag to switch between tauri's `dev` and `build` modes.
+# DO NOT REMOVE!!
+custom-protocol = [ "tauri/custom-protocol" ]

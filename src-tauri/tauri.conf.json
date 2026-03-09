@@ -1,0 +1,96 @@
+{
+    "build": {
+        "beforeBuildCommand": "npm run build",
+        "beforeDevCommand": "npm run dev",
+        "devPath": "../dist",
+        "distDir": "../dist",
+        "withGlobalTauri": false
+    },
+    "package": {
+        "productName": "M3U8Downloader",
+        "version": "0.1.0"
+    },
+    "tauri": {
+        "allowlist": {
+            "all": false,
+            "fs": {
+                "all": false,
+                "readFile": true,
+                "writeFile": true
+            },
+            "http": {
+                "all": true
+            },
+            "path": {
+                "all": true
+            },
+            "dialog": {
+                "all": true
+            },
+            "window": {
+                "close": true
+            },
+            "process": {
+                "exit": true
+            },
+            "shell": {
+                "all": false,
+                "execute": false,
+                "sidecar": true
+            }
+        },
+        "bundle": {
+            "active": true,
+            "category": "DeveloperTool",
+            "copyright": "",
+            "deb": {
+                "depends": []
+            },
+            "externalBin": [
+                "bin/ffmpeg"
+            ],
+            "icon": [
+                "icons/32x32.png",
+                "icons/128x128.png",
+                "icons/128x128@2x.png",
+                "icons/icon.icns",
+                "icons/icon.ico"
+            ],
+            "identifier": "com.m3u8downloader.app",
+            "longDescription": "",
+            "macOS": {
+                "entitlements": null,
+                "exceptionDomain": "",
+                "frameworks": [],
+                "providerShortName": null,
+                "signingIdentity": null
+            },
+            "resources": [],
+            "shortDescription": "",
+            "targets": "all",
+            "windows": {
+                "certificateThumbprint": null,
+                "digestAlgorithm": "sha256",
+                "timestampUrl": "",
+                "nsis": {
+                    "installMode": "both"
+                }
+            }
+        },
+        "security": {
+            "csp": null
+        },
+        "updater": {
+            "active": false
+        },
+        "windows": [
+            {
+                "fullscreen": false,
+                "height": 600,
+                "resizable": true,
+                "title": "M3U8 Downloader",
+                "width": 960
+            }
+        ]
+    }
+}

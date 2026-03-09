@@ -1,0 +1,48 @@
+/* --- Global Layout --- */
+body {
+    margin: 0;
+    font-family: var(--font-family);
+    background-color: var(--surface-ground);
+    color: var(--text-color);
+}
+
+/* The strip running along the bottom of the tabs */
+.p-tablist {
+    border-bottom: 1px solid var(--surface-border, #ccc);
+    background: var(--surface-card, #fff);
+    padding-left: 10px;
+    padding-top: 5px;
+}
+
+.p-tab {
+    margin-right: 4px;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-weight: 600;
+    color: var(--text-color-secondary);
+}
+
+.p-tab:hover {
+    background-color: var(--surface-hover);
+}
+
+.p-tab-active {
+    background-color: var(--surface-ground);
+    border-color: var(--surface-border, #ccc);
+    border-bottom-color: transparent;
+    color: var(--primary-color);
+    position: relative;
+    top: 1px; /* Push it down 1px to cover the TabList line */
+}
+
+.p-tabpanels {
+    background-color: var(--surface-ground);
+    padding: 0;
+    flex-grow: 1;
+    overflow-y: auto;
+}

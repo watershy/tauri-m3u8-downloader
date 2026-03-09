@@ -1,0 +1,14 @@
+/target/
+/dist/
+node_modules
+/temp
+/logs
+/src-tauri/target/
+*mp4
+
+
+/*.json
+!/package.json
+!/package-lock.json
+!/tauri.conf.json
+access_token.txt

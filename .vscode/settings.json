@@ -1,0 +1,17 @@
+{
+    "files.exclude": {
+        "node_modules": true,
+        "dist": true,
+        "icons": true,
+        "ui/dist": true,
+        "ui/js": true,
+        "target": true,
+        "logs/": true,
+        "**/*.mp4": true,
+    },
+    "search.exclude": {
+        "**/ui/dist/**": true,
+        "node_modules": true,
+        "ui/js": true
+    }
+}
