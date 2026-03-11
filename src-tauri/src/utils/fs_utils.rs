@@ -77,8 +77,15 @@ pub fn get_download_dir(job_id: &str) -> Result<PathBuf, String> {
 /* #endregion */
 
 /* #region file IO */
-pub fn read_text_from_file(file_name: &str) -> Result<String, String> {
-    std_fs::read_to_string(file_name).map_err(|e| e.to_string())
+
+pub async fn create_file_async<P: AsRef<Path>>(path: P) -> Result<tokio_fs::File, String> {
+    tokio_fs::File::create(path)
+        .await
+        .map_err(|e| format!("Failed to create file: {}", e))
+}
+
+pub fn read_text_from_file<P: AsRef<Path>>(path: P) -> Result<String, String> {
+    std_fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
 pub async fn read_text_from_file_async<P: AsRef<Path>>(path: P) -> Result<String, String> {
@@ -207,9 +214,22 @@ pub async fn remove_dir_all_async<P: AsRef<Path>>(path: P) -> Result<(), String>
     }
 }
 
+pub async fn rename_file_async<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> Result<(), String> {
+    tokio_fs::rename(from, to)
+        .await
+        .map_err(|e| format!("Failed to rename temp file: {}", e))
+}
+
 pub fn get_file_size(file_path: &str) -> Result<u64, String> {
-    let metadata = std::fs::metadata(&file_path).map_err(|e| e.to_string())?;
+    let metadata = std_fs::metadata(&file_path).map_err(|e| e.to_string())?;
     Ok(metadata.len())
+}
+
+pub async fn get_file_size_async<P: AsRef<Path>>(path: P) -> Result<u64, String> {
+    tokio_fs::metadata(path)
+        .await
+        .map(|metadata| metadata.len())
+        .map_err(|e| format!("Failed to read file metadata: {}", e))
 }
 
 /* #endregion */
@@ -308,7 +328,7 @@ pub fn load_jobs_from_disk()-> Vec<DownloadJob> {
 
     // 2. Read and Deserialize
     // We use standard fs because this runs once at startup (blocking is fine/expected here)
-    match std::fs::read_to_string(&path) {
+    match std_fs::read_to_string(&path) {
         Ok(content) => {
             serde_json::from_str(&content).unwrap_or_else(|e| {
                 eprintln!("Failed to parse jobs.json: {}", e);

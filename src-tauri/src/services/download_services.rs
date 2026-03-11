@@ -6,7 +6,6 @@ use tokio::sync::{Semaphore, mpsc};
 use tauri::api::process::{Command, CommandEvent};
 use tokio::time::{sleep, interval};
 use tokio::io::AsyncWriteExt;
-use tokio::fs as tokio_fs;
 use tokio_util::sync::CancellationToken;
 use futures_util::StreamExt;
 use crate::types::*;
@@ -414,9 +413,7 @@ pub async fn download_file_with_retry(
         match perform_single_download(client, url, &temp_path, headers, is_ts, &progress_tx).await {
             Ok(_) => {
                 // Atomic Rename on Success: .part -> .ts
-                if let Err(e) = tokio_fs::rename(&temp_path, final_path).await {
-                    return Err(format!("Failed to rename temp file: {}", e));
-                }
+                fs_utils::rename_file_async(&temp_path, final_path).await?;
                 return Ok(());
             },
             Err(e) => {
@@ -455,8 +452,7 @@ async fn perform_single_download(
     }
 
     // C. Create Temp File
-    let mut file = tokio_fs::File::create(temp_path).await
-        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    let mut file = fs_utils::create_file_async(temp_path).await?;
 
     // D. Stream Loop with Header Stripping
     let mut stream = response.bytes_stream();
@@ -498,8 +494,8 @@ async fn perform_single_download(
 }
 
 async fn check_existing_file(path: &PathBuf, progress_tx: &mpsc::Sender<DownloadProgress>) -> bool {
-    if let Ok(metadata) = tokio_fs::metadata(path).await {
-        let size = metadata.len();
+    // We only care if get_file_size_async succeeds (Ok)
+    if let Ok(size) = fs_utils::get_file_size_async(path).await {
         if size > 0 {
             // Tell the UI we "downloaded" this already, so the Total Progress bar is correct.
             let _ = progress_tx.send(DownloadProgress::BytesDownloaded(size)).await;

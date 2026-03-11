@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use tauri::State;
-use tokio::fs as tokio_fs;
-use std::path::PathBuf;
 use crate::services::download_services;
 use crate::types::*;
 use crate::utils::*;
@@ -144,7 +142,7 @@ pub async fn delete_job(
 
     if let Ok(download_folder) = fs_utils::get_download_dir(&job_id) {
         if download_folder.exists() {
-            if let Err(e) = tokio_fs::remove_dir_all(&download_folder).await {
+            if let Err(e) = fs_utils::remove_dir_all_async(&download_folder).await {
                 println!("Warning: Could not delete temp folder for {}: {}", job_id, e);
             }
         }
