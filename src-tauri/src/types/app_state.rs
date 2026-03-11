@@ -23,12 +23,12 @@ impl AppState {
         }
     }
 
-    fn guard_jobs(&self) -> Result<MutexGuard<Vec<DownloadJob>>, String> {
+    fn guard_jobs(&self) -> Result<MutexGuard<'_, Vec<DownloadJob>>, String> {
         self.download_jobs.lock()
             .map_err(|e| format!("Failed to lock jobs: {}", e))
     }
 
-    fn guard_settings(&self) -> Result<MutexGuard<AppSettings>, String> {
+    fn guard_settings(&self) -> Result<MutexGuard<'_, AppSettings>, String> {
         self.settings.lock()
             .map_err(|e| format!("Failed to lock settings: {}", e))
     }

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
-use crate::types::MediaSegment;
 use crate::types::LogLevel;
 use crate::utils::time_utils;
 
@@ -63,11 +62,6 @@ pub struct DownloadJob {
     //pub video_type: String, // "HLS", "MP4", etc.
     pub status: DownloadStatus,
 
-    // Instead of the raw M3U8, store a list of tracking objects
-    // This tells us EXACTLY which chunks are missing for resume.
-    #[serde(skip)]
-    pub segments: Vec<MediaSegment>,
-
     pub downloaded_bytes: u64,      // Sum of already downloaded bytes
     pub total_segments: u32,        // Total count (e.g., 150 ts files)
     pub downloaded_segments: u32,   // Count of completed (e.g., 45)
@@ -92,7 +86,6 @@ impl Default for DownloadJob {
             save_folder: String::new(),
             //video_type: String::from("mp4"),
             status: DownloadStatus::Queued,
-            segments: Vec::new(),
             downloaded_bytes: 0,
             total_segments: 0,
             downloaded_segments: 0,
@@ -118,7 +111,6 @@ impl DownloadJob {
             save_folder,
             //video_type: "video/mp4".to_string(),
             status: DownloadStatus::Downloading,
-            segments: Vec::new(),
             downloaded_bytes: 0,
             total_segments,
             downloaded_segments: 0,

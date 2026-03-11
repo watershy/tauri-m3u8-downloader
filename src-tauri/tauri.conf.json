@@ -73,7 +73,8 @@
                 "digestAlgorithm": "sha256",
                 "timestampUrl": "",
                 "nsis": {
-                    "installMode": "both"
+                    "installMode": "currentUser",
+                    "installerIcon": "icons/icon.ico"
                 }
             }
         },
