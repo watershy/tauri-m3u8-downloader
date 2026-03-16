@@ -94,6 +94,10 @@ impl M3U8MasterPlaylist {
             })
             .collect();
 
+        playlist.resolution_options.sort_by(|a, b| {
+            a.bandwidth_kbps.cmp(&b.bandwidth_kbps)
+        });
+
         Ok(playlist)
     }
     
@@ -105,6 +109,20 @@ impl M3U8MasterPlaylist {
 
     fn parse_stream_inf(&mut self, line: &str, lines: &[&str], current_index: usize, master_url: &str) -> Result<(), Box<dyn std::error::Error>> {
         let attributes = string_utils::parse_attributes(line)?;
+
+        let has_resolution = attributes.contains_key("RESOLUTION");
+        let codecs = attributes.get("CODECS").map(|s: &String| s.as_str()).unwrap_or("").to_lowercase();
+        let has_video_codec = codecs.contains("avc") || // H.264
+                              codecs.contains("hev") || // H.265
+                              codecs.contains("hvc") || // H.265
+                              codecs.contains("vp9") || // VP9
+                              codecs.contains("av0");   // AV1
+
+        if !has_resolution && !has_video_codec && !codecs.is_empty() {
+            // It is an audio-only fallback stream. Skip processing this stream entirely.
+            return Ok(()); 
+        }
+        
         // Fetch the URI directly from the next line in the pre-parsed lines
         let uri = lines
             .get(current_index + 1) // Get the next line after the current line
@@ -216,7 +234,15 @@ impl M3U8MediaPlaylist {
                     });
                 }
             } else if line.starts_with("#EXTINF") {
-                let duration = line.split(':').nth(1).unwrap().trim_end_matches(',').parse()?;
+                let duration: f64 = line
+                    .split(':')
+                    .nth(1)
+                    .unwrap_or("0")
+                    .split(',')
+                    .next()
+                    .unwrap_or("0")
+                    .trim()
+                    .parse()?;
                 current_segment = Some(MediaSegment {
                     url: String::new(),
                     sequence: index,
