@@ -20,12 +20,37 @@ pub async fn check_media(
     match m3u8_utils::parse_m3u8_content(&m3u8_content, &url).await {
         Ok(data) => match data {
             PlaylistData::Master(master_data) => {
+                let audios: Vec<AudioOption> = master_data.media_renditions
+                    .iter()
+                    .filter(|m| m.r#type == "AUDIO" && m.uri.is_some())
+                    .enumerate()
+                    .map(|(index, m)| {
+                        // Safely unwrap the URI since we filtered for is_some()
+                        let raw_uri = m.uri.clone().unwrap();
+
+                        // Make sure to resolve it against the master playlist URL.
+                        let full_uri = crate::utils::string_utils::resolve_m3u8_url(url, raw_uri);
+
+                        AudioOption {
+                            id: index,
+                            name: m.name.clone(),
+                            language: m.language.clone().unwrap_or_else(|| "Unknown".to_string()),
+                            uri: full_uri,
+                        }
+                    })
+                    .collect();
+
+                // 2. Wrap it in an Option
+                let audio_options = if audios.is_empty() { None } else { Some(audios) };
+
                 Ok(CheckMediaResult::success(
                     0,
                     String::new(),
                     save_folder,
                     suggested_file_name,
-                    Some(master_data.resolution_options)))
+                    Some(master_data.resolution_options),
+                    audio_options,
+                ))
             },
             PlaylistData::Media(media_data) => {
                 if !media_data.first_segment_url.is_empty() {
@@ -45,7 +70,8 @@ pub async fn check_media(
                     media_data.first_segment_url,
                     save_folder,
                     suggested_file_name,
-                    None))
+                    None,
+                None))
             }
         },
         Err(e) => {

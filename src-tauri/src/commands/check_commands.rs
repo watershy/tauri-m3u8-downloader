@@ -9,7 +9,7 @@ use crate::utils::path_utils;
 
 #[tauri::command]
 pub async fn check_media(
-    video_url: String,
+    m3u8_url: String,
     http_headers: std::collections::HashMap<String, String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<CheckMediaResult, String> {
@@ -27,7 +27,7 @@ pub async fn check_media(
             .collect::<Vec<PathBuf>>()
     }).unwrap_or_default();
 
-    media_services::check_media(&video_url, &http_headers, save_folder, &active_paths)
+    media_services::check_media(&m3u8_url, &http_headers, save_folder, &active_paths)
     .await
     .map_err(|e| format!("Failed to download video: {}", e))
     .log_err()

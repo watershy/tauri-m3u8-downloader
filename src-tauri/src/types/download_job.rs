@@ -55,7 +55,8 @@ impl DownloadStatus {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DownloadJob {
     pub id: String,
-    pub m3u8_url: String,
+    pub video_url: String,
+    pub audio_url: Option<String>,
     pub http_headers: HashMap<String, String>,
     pub file_name: String,
     pub save_folder: String,
@@ -81,7 +82,8 @@ impl Default for DownloadJob {
         DownloadJob {
             id: String::new(),
             file_name: String::new(),
-            m3u8_url: String::new(),
+            video_url: String::new(),
+            audio_url: None,
             http_headers: HashMap::new(),
             save_folder: String::new(),
             //video_type: String::from("mp4"),
@@ -102,11 +104,19 @@ impl Default for DownloadJob {
 }
 
 impl DownloadJob {
-    pub fn new(url: String, http_headers: HashMap<String, String>, save_folder: String, file_name: String, total_segments: u32) -> Self {
+    pub fn new(
+        video_url: String,
+        audio_url: Option<String>,
+        http_headers: HashMap<String, String>,
+        save_folder: String,
+        file_name: String,
+        total_segments: u32
+    ) -> Self {
         DownloadJob {
             id: Uuid::new_v4().to_string(),
             file_name,
-            m3u8_url: url,
+            video_url: video_url,
+            audio_url: audio_url,
             http_headers: http_headers,
             save_folder,
             //video_type: "video/mp4".to_string(),

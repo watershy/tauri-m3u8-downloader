@@ -8,6 +8,7 @@ pub mod log_level;
 pub mod log_category;
 pub mod log_update;
 pub mod target_file_status;
+pub mod track_type;
 
 pub use app_settings::*;
 pub use app_state::*;
@@ -19,3 +20,4 @@ pub use log_level::*;
 pub use log_category::*;
 pub use log_update::*;
 pub use target_file_status::*;
+pub use track_type::*;

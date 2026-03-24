@@ -8,6 +8,14 @@ pub struct ResolutionOption {
     pub uri: String,
 }
 
+#[derive(Serialize, Debug, Clone)]
+pub struct AudioOption {
+    pub id: usize,
+    pub name: String,
+    pub language: String,
+    pub uri: String,
+}
+
 #[derive(Serialize)]
 pub struct CheckMediaResult {
     pub success: bool,
@@ -17,6 +25,7 @@ pub struct CheckMediaResult {
     pub save_folder: String,
     pub suggested_filename: String,
     pub resolutions: Option<Vec<ResolutionOption>>,
+    pub audios: Option<Vec<AudioOption>>,
 }
 
 impl CheckMediaResult {
@@ -25,7 +34,9 @@ impl CheckMediaResult {
         first_segment_url: String,
         save_folder: String,
         suggested_filename: String,
-        resolutions: Option<Vec<ResolutionOption>>) -> Self {
+        resolutions: Option<Vec<ResolutionOption>>,
+        audios: Option<Vec<AudioOption>>,
+    ) -> Self {
         Self {
             success: true,
             message: String::new(),
@@ -34,6 +45,7 @@ impl CheckMediaResult {
             save_folder: save_folder,
             suggested_filename: suggested_filename,
             resolutions,
+            audios,
         }
     }
 
@@ -46,6 +58,7 @@ impl CheckMediaResult {
             save_folder: String::new(),
             suggested_filename: String::new(),
             resolutions: None,
+            audios: None,
         }
     }
 }

@@ -22,6 +22,7 @@ pub async fn start_download_task(
     headers: HashMap<String, String>,
     save_to_file: PathBuf,
     media_data: M3U8MediaPlaylist,
+    audio_data: Option<M3U8MediaPlaylist>,
     state: AppState
 ) -> Result<(), String> {
     // 1. Create and Register the "Kill Switch"
@@ -40,6 +41,7 @@ pub async fn start_download_task(
             headers,
             save_to_file,
             media_data,
+            audio_data,
             cancel_token,
             state_clone.clone()
         ).await;
@@ -67,19 +69,55 @@ pub async fn download_and_merge(
     headers: HashMap<String, String>,
     save_to_file: PathBuf,
     media_data: M3U8MediaPlaylist,
+    audio_data: Option<M3U8MediaPlaylist>,
     cancel_token: CancellationToken,
     state: AppState
 ) -> Result<(), String> {
     // Producer-Consumer
     let download_folder = fs_utils::get_download_dir(&job_id)?;
-    let total_segments = media_data.total_segments;
+    let mut total_segments = media_data.total_segments;
+    if let Some(ref audio) = audio_data {
+        total_segments += audio.total_segments;
+    }
+
     write_job_log(&job_id, LogCategory::Download, LogLevel::Info,
         &format!("Downloading {} segments to \"{}\"", total_segments, download_folder.to_string())).await;
 
+    let video_folder = path_utils::join(&download_folder, "video");
+    let audio_folder = path_utils::join(&download_folder, "audio");
+
     let (tx, rx) = mpsc::channel::<DownloadProgress>(10000);
 
-    // Spawn the workers (Producer) - This returns immediately
-    spawn_download_workers(media_data, download_folder.clone(), headers, tx, cancel_token.clone());
+    // Spawn the workers (Producer) for video task - This returns immediately
+    spawn_download_workers(
+        false,
+        media_data,
+        video_folder,
+        headers.clone(),
+        tx.clone(),
+        cancel_token.clone()
+    );
+
+    if let Some(audio_playlist) = audio_data {
+        // Spawn the workers (Producer) for audio task - This returns immediately
+        write_job_log(
+            &job_id,
+            LogCategory::Download,
+            LogLevel::Info,
+            "Audio track detected. Spawning audio workers..."
+        ).await;
+        spawn_download_workers(
+            true,
+            audio_playlist, 
+            audio_folder, 
+            headers.clone(), 
+            tx.clone(), 
+            cancel_token.clone()
+        );
+    }
+
+    // CRITICAL: Drop the original `tx` here
+    drop(tx);
 
     // Run the monitor (Consumer) - This blocks until all downloads finish
     if let Err(e) = monitor_progress(rx, state.clone(), job_id.clone(), total_segments, cancel_token.clone()).await {
@@ -138,6 +176,7 @@ pub async fn download_and_merge(
 }
 
 fn spawn_download_workers(
+    is_audio: bool,
     media_data: M3U8MediaPlaylist,
     base_folder: PathBuf,
     headers: HashMap<String, String>,
@@ -150,7 +189,7 @@ fn spawn_download_workers(
         let semaphore = Arc::new(Semaphore::new(10));
         let shared_headers = Arc::new(headers);
         let is_ts = media_data.init_map_file.is_none();
-        let extension = if is_ts { "m4s" } else { "ts" };
+        let extension = if is_ts { "ts" } else { "m4s" };
         let mut download_queue = Vec::new();
 
         if let Some(init_seg) = media_data.init_map_file {
@@ -194,10 +233,11 @@ fn spawn_download_workers(
                     tx.clone()).await;
                 
                 let success = result.is_ok();
+                let task_type = if is_audio { "audio" } else { "video" };
                 if let Err(e) = result {
-                    let _ = tx.send(DownloadProgress::Log(LogLevel::Error, format!("Download failed for {}: {}", file_name, e))).await;
+                    let _ = tx.send(DownloadProgress::Log(LogLevel::Error, format!("Download failed for {} segment {}: {}", task_type, file_name, e))).await;
                 } else {
-                    let _ = tx.send(DownloadProgress::Log(LogLevel::Debug, format!("Downloaded segment: {} (out of {} segments)", file_name, total_segments))).await;
+                    let _ = tx.send(DownloadProgress::Log(LogLevel::Debug, format!("Downloaded {} segment: {} (out of {} segments)", task_type,  file_name, total_segments))).await;
                 }
                 
                 let _ = tx.send(DownloadProgress::SegmentFinished(success)).await;
@@ -277,7 +317,6 @@ async fn monitor_progress(
                 // If the workers were sleeping, session_bytes == last_bytes, making speed 0.
                 let speed = if elapsed > 0.0 { ((session_bytes - last_bytes) as f64 / elapsed) as u64 } else { 0 };
                 let progress = if total_segments > 0 { (finished_segments as f32 / total_segments as f32) * 0.95 } else { 0.0 };
-                
                 let eta = if finished_segments > 0 {
                     let avg = start_time.elapsed().as_secs_f64() / finished_segments as f64;
                     (avg * (total_segments - finished_segments) as f64) as u64
@@ -520,24 +559,31 @@ pub async fn merge_segments(
     save_to_file: &str,
     cancel_token: CancellationToken,
 ) -> Result<(), String> {
-    // 1. Preparation
-    let files = fs_utils::get_sorted_files(base_folder, &["mp4", "m4s", "ts"]).await?;
-    if files.is_empty() {
-        return Err("No video segments found to merge".to_string());
+    let video_folder = path_utils::join(base_folder, "video");
+    let audio_folder = path_utils::join(base_folder, "audio");
+
+    let video_files = fs_utils::get_sorted_files(&video_folder, &["mp4", "m4s", "ts"]).await?;
+    if video_files.is_empty() {
+        return Err("No video segments found to merge. Download may have failed.".to_string());
     }
 
-    write_job_log(job_id, LogCategory::Merge, LogLevel::Info, &format!("Merging {} segments into {:?}", files.len(), save_to_file)).await;
-
-    // 2. Strategy Selection
-    let has_init_segment = files.iter().any(|p| 
-        p.file_name().and_then(|n| n.to_str()).map(|s| s == "init.mp4").unwrap_or(false)
-    );
-
-    if has_init_segment {
-        merge_strategy_binary(job_id, base_folder, &files, save_to_file, cancel_token).await
-    } else {
-        merge_strategy_concat(job_id, base_folder, &files, save_to_file, cancel_token).await
+    let mut audio_files = Vec::new();
+    if audio_folder.exists() {
+        if let Ok(files) = fs_utils::get_sorted_files(&audio_folder, &["mp4", "m4s", "ts", "aac", "m4a"]).await {
+            audio_files = files;
+        }
     }
+
+    let audio_files_opt = if audio_files.is_empty() { None } else { Some(audio_files.as_slice()) };
+    let audio_log = if audio_files.is_empty() { "No separate audio track." } else { "With separate audio track." };
+    write_job_log(
+        job_id, 
+        LogCategory::Merge, 
+        LogLevel::Info, 
+        &format!("Merging {} video segments and {} audio segments into {}. {}", video_files.len(), audio_files.len(), save_to_file.to_string(), audio_log)
+    ).await;
+
+    merge_media(job_id, base_folder, &video_files, audio_files_opt, save_to_file, cancel_token).await
 }
 
 macro_rules! build_args {
@@ -548,67 +594,107 @@ macro_rules! build_args {
     };
 }
 
-async fn merge_strategy_binary(
+// async fn merge_strategy_binary(
+//     job_id: &str,
+//     base_folder: &PathBuf,
+//     files: &[PathBuf],
+//     save_to_file: &str,
+//     cancel_token: CancellationToken
+// ) -> Result<(), String> {
+//     write_job_log(job_id, LogCategory::Merge, LogLevel::Info, "Strategy: Binary Merge (Fragmented MP4)").await;
+
+//     let temp_merged_path = base_folder.join("temp_merged.mp4");
+
+//     fs_utils::concatenate_files(files, &temp_merged_path).await?;
+
+//     let args: Vec<String> = build_args!(
+//         "-hide_banner",
+//         "-y",
+//         "-i", temp_merged_path.to_string_lossy(),
+//         "-c", "copy",
+//         "-movflags", "+faststart",
+//         save_to_file
+//     );
+
+//     let result = run_ffmpeg_command(args, job_id, cancel_token).await;
+//     result
+// }
+
+// async fn merge_strategy_concat(
+//     job_id: &str,
+//     base_folder: &PathBuf,
+//     files: &[PathBuf],
+//     save_to_file: &str,
+//     cancel_token: CancellationToken,
+// ) -> Result<(), String> {
+//     write_job_log(job_id, LogCategory::Merge, LogLevel::Info, "Strategy: FFmpeg Concat Demuxer").await;
+
+//     // 1. Generate List
+//     let list_path = base_folder.join("segments.txt");
+//     let content = files.iter()
+//         .map(|p| {
+//             // FFmpeg prefers forward slashes, even on Windows
+//             let path_str = p.to_string_lossy().replace('\\', "/");
+//             format!("file '{}'\n", path_str)
+//         })
+//         .collect::<String>();
+
+//     fs_utils::write_file_async(&list_path, &content).await?;
+
+//     let args = build_args!(
+//         "-hide_banner",
+//         "-f", "concat",
+//         "-safe", "0",
+//         "-i", list_path.to_string_lossy(),
+//         "-c", "copy",
+//         "-movflags", "+faststart",
+//         "-y", save_to_file
+//     );
+
+//     run_ffmpeg_command(args, job_id, cancel_token).await
+// }
+
+async fn merge_media(
     job_id: &str,
     base_folder: &PathBuf,
-    files: &[PathBuf],
+    video_files: &[PathBuf],
+    audio_files: Option<&[PathBuf]>, // Pass Some(files) if it's a split stream!
     save_to_file: &str,
     cancel_token: CancellationToken
 ) -> Result<(), String> {
-    write_job_log(job_id, LogCategory::Merge, LogLevel::Info, "Strategy: Binary Merge (Fragmented MP4)").await;
+    write_job_log(job_id, LogCategory::Merge, LogLevel::Info, "Strategy: Universal Binary Remux").await;
 
-    let temp_merged_path = base_folder.join("temp_merged.mp4");
+    // Concat the Video Track
+    let temp_video_path = base_folder.join("temp_video_merged.dat");
+    write_job_log(job_id, LogCategory::Merge, LogLevel::Debug, "Concatenating video segments...").await;
+    fs_utils::concatenate_files(video_files, &temp_video_path).await?;
 
-    fs_utils::concatenate_files(files, &temp_merged_path).await?;
-
-    let args = build_args!(
+    // Build Base FFmpeg Args
+    let mut args: Vec<String> = build_args!(
         "-hide_banner",
         "-y",
-        "-i", temp_merged_path.to_string_lossy(),
+        "-i", temp_video_path.to_string_lossy()
+    );
+
+    // Handle Optional Split Audio Track
+    let temp_audio_path = base_folder.join("temp_audio_merged.dat");
+    if let Some(audio_segment_paths) = audio_files {
+        write_job_log(job_id, LogCategory::Merge, LogLevel::Debug, "Concatenating separate audio segments...").await;
+        fs_utils::concatenate_files(audio_segment_paths, &temp_audio_path).await?;
+
+        // Add the second input to FFmpeg
+        args.push("-i".to_string());
+        args.push(temp_audio_path.to_string_lossy().to_string());
+    }
+
+    // Add the Remuxing and Output Flags
+    args.extend(build_args!(
         "-c", "copy",
-        "-movflags", "+faststart",
+        "-movflags", "+faststart",   // Build the MP4 Table of Contents at the beginning
         save_to_file
-    );
+    ));
 
-    let result = run_ffmpeg_command(args, job_id, cancel_token).await;
-    result
-}
-
-async fn merge_strategy_concat(
-    job_id: &str,
-    base_folder: &PathBuf,
-    files: &[PathBuf],
-    save_to_file: &str,
-    cancel_token: CancellationToken,
-) -> Result<(), String> {
-    write_job_log(job_id, LogCategory::Merge, LogLevel::Info, "Strategy: FFmpeg Concat Demuxer").await;
-
-    // 1. Generate List
-    let list_path = base_folder.join("segments.txt");
-    // let content = files.iter()
-    //     .filter_map(|p| p.file_name().and_then(|n| n.to_str()))
-    //     .map(|name| format!("file '{}'\n", name))
-    //     .collect::<String>();
-    let content = files.iter()
-        .map(|p| {
-            // FFmpeg prefers forward slashes, even on Windows
-            let path_str = p.to_string_lossy().replace('\\', "/");
-            format!("file '{}'\n", path_str)
-        })
-        .collect::<String>();
-
-    fs_utils::write_file_async(&list_path, &content).await?;
-
-    let args = build_args!(
-        "-hide_banner",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", list_path.to_string_lossy(),
-        "-c", "copy",
-        "-movflags", "+faststart",
-        "-y", save_to_file
-    );
-
+    // Run ffmpeg command
     run_ffmpeg_command(args, job_id, cancel_token).await
 }
 

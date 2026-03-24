@@ -5,37 +5,73 @@ use crate::types::*;
 use crate::utils::*;
 
 pub async fn create_job(
-    url: String,
+    video_url: String,
+    audio_url: Option<String>,
     headers: HashMap<String, String>,
     save_folder: String,
     file_name: String,
     state: AppState
 ) -> Result<String, String> { // Returns Job ID on success
-
     // 1. Fetch & Parse M3U8
-    let m3u8_content = network_utils::fetch_http_content(&url, &headers).await?;
-    let media_data: M3U8MediaPlaylist = match m3u8_utils::parse_m3u8_content(&m3u8_content, &url).await? {
+    let video_m3u8_content = network_utils::fetch_http_content(&video_url, &headers).await?;
+    let video_media_data: M3U8MediaPlaylist = match m3u8_utils::parse_m3u8_content(&video_m3u8_content, &video_url).await? {
         PlaylistData::Master(_) => return Err("Cannot download Master playlist directly".to_string()),
         PlaylistData::Media(d) => d,
     };
 
+    // 2. Fetch & Parse Audio M3U8 (if it exists)
+    let mut audio_m3u8_content: Option<String> = None;
+    let mut audio_media_data: Option<M3U8MediaPlaylist> = None;
+    if let Some(ref a_url) = audio_url {
+        let content = network_utils::fetch_http_content(a_url, &headers).await?;
+        match m3u8_utils::parse_m3u8_content(&content, a_url).await? {
+            PlaylistData::Master(_) => return Err("Audio URL points to a Master Playlist".to_string()),
+            PlaylistData::Media(d) => {
+                audio_media_data = Some(d);
+                audio_m3u8_content = Some(content);
+            }
+        }
+    }
+
     // 2. Initialize Job State (Memory & Disk)
-    let total_segments = media_data.total_segments;
-    let job_id = init_job_state(&state, &url, &headers, &save_folder, &file_name, total_segments).await?;
+    let mut total_segments = video_media_data.total_segments;
+    if let Some(ref a_data) = audio_media_data {
+        total_segments += a_data.total_segments;
+    }
+
+    let job_id = init_job_state(&state, video_url.clone(), audio_url.clone(), &headers, &save_folder, &file_name, total_segments).await?;
 
     // 3. Setup Filesystem
     let download_folder = fs_utils::get_download_dir(&job_id)?; // Ensure folder exists
     fs_utils::ensure_directory_exists_async(&download_folder).await?;
     let save_to_file = path_utils::join(save_folder,file_name);
 
-    let m3u8_backup_file_path = fs_utils::save_m3u8_content(&job_id, &m3u8_content)
+    // Save Video Backup
+    let m3u8_backup_file_path = fs_utils::save_m3u8_content(&job_id, &video_m3u8_content, TrackType::Video)
         .await
-        .map_err(|e| format!("Failed to save M3U8 backup: {}", e))?;
+        .map_err(|e| format!("Failed to save video M3U8 backup: {}", e))?;
+
+    let mut audio_backup_file_path: Option<String> = None;
+    if let Some(audio_content) = &audio_m3u8_content {
+        // Save Audio Backup
+        let path = fs_utils::save_m3u8_content(&job_id, audio_content, TrackType::Audio)
+            .await
+            .map_err(|e| format!("Failed to save audio M3U8 backup: {}", e))?;
+        audio_backup_file_path = Some(path);
+    }
 
     // 4. Write Initial Logs
     write_job_log(&job_id, LogCategory::General, LogLevel::Info, "Job initialized.").await;
-    write_job_log(&job_id, LogCategory::General, LogLevel::Info, &format!("Downloading from \"{}\"", url)).await;
-    write_job_log(&job_id, LogCategory::General, LogLevel::Info, &format!("M3U8 file saved to \"{}\"", m3u8_backup_file_path)).await;
+    write_job_log(&job_id, LogCategory::General, LogLevel::Info, &format!("Video URL: \"{}\"", video_url)).await;
+    if let Some(ref audio_url_val) = audio_url {
+        write_job_log(&job_id, LogCategory::General, LogLevel::Info, &format!("Audio URL: \"{}\"", audio_url_val)).await;
+    }
+
+    write_job_log(&job_id, LogCategory::General, LogLevel::Info, &format!("Video M3U8 file saved to \"{}\"", m3u8_backup_file_path)).await;
+    if let Some(path) = audio_backup_file_path {
+        write_job_log(&job_id, LogCategory::General, LogLevel::Info, &format!("Audio M3U8 file saved to \"{}\"", path)).await;
+    }
+
     write_job_log(&job_id, LogCategory::General, LogLevel::Info, &format!("Total Segments: {}", total_segments)).await;
     write_job_log(&job_id, LogCategory::General, LogLevel::Info, &format!("Video file to be downloaded to: \"{}\"", save_to_file.to_string())).await;
 
@@ -44,73 +80,90 @@ pub async fn create_job(
         job_id.clone(),
         headers,
         save_to_file,
-        media_data,
+        video_media_data,
+        audio_media_data,
         state
     ).await?;
 
     Ok(job_id)
 }
 
+async fn fetch_or_fallback_playlist(
+    job_id: &str,
+    url: &str,
+    track_type: TrackType,
+    headers: &HashMap<String, String>,
+) -> Result<M3U8MediaPlaylist, String> {
+    let track_name = track_type.as_str();
+
+    match network_utils::fetch_http_content(url, headers).await {
+        Ok(content) => {
+            write_job_log(job_id, LogCategory::General, LogLevel::Info, &format!("Resume: Refreshed {} playlist from server.", track_name)).await;
+
+            let data = m3u8_utils::parse_m3u8_content(&content, url).await
+                .map_err(|e| format!("Parsed invalid {} data from refresh: {}", track_name, e))?;
+            let media = match data {
+                PlaylistData::Media(m) => m,
+                PlaylistData::Master(_) => return Err(format!("Resumed {} URL is a Master Playlist.", track_name)),
+            };
+
+            if let Err(e) = fs_utils::save_m3u8_content(job_id, &content, track_type).await {
+                write_job_log(job_id, LogCategory::General, LogLevel::Warning, &format!("Failed to save {} backup: {}", track_name, e)).await;
+            }
+            
+            Ok(media)
+        },
+        Err(e) => {
+            write_job_log(job_id, LogCategory::General, LogLevel::Warning, &format!("{} refresh failed ({}), fallback to local M3U8...", track_name, e)).await;
+
+            // Note: Update this to pass TrackType into your fs_utils!
+            let backup_path = fs_utils::get_job_m3u8_backup_file_path(job_id, track_type)?;
+            let saved_content = fs_utils::read_text_from_file_async(&backup_path).await?;
+            let data = m3u8_utils::parse_m3u8_content(&saved_content, url).await
+                .map_err(|e| format!("Failed to parse local {} backup: {}", track_name, e))?;
+            
+            let media = match data {
+                PlaylistData::Media(m) => m,
+                PlaylistData::Master(_) => return Err(format!("Saved {} backup is a Master Playlist.", track_name)),
+            };
+            
+            Ok(media)
+        }
+    }
+}
+
 pub async fn resume_job(
-    job_id: String, 
-    original_url: String, 
-    save_folder: String, 
-    file_name: String, 
+    job_id: String,
+    video_url: String,
+    audio_url: Option<String>,
+    save_folder: String,
+    file_name: String,
     headers: HashMap<String, String>,
     state: AppState
 ) -> Result<(), String> {
+    // Fetch/Fallback Video
+    let video_media = fetch_or_fallback_playlist(&job_id, &video_url, TrackType::Video, &headers).await?;
 
-    // --- PHASE 1: TRY FRESH FETCH (Preferred) ---
-    let fresh_fetch_result = network_utils::fetch_http_content(&original_url, &headers).await;
-
-    // Determine data and whether we need to save the new m3u8 backup
-    let (media_data, should_save_backup, content_to_save) = match fresh_fetch_result {
-        Ok(content) => {
-            write_job_log(&job_id, LogCategory::General, LogLevel::Info, "Resume: Successfully refreshed playlist from server.").await;
-            let data = m3u8_utils::parse_m3u8_content(&content, &original_url).await
-                .map_err(|e| format!("Parsed invalid data from refresh: {}", e))?;
-
-            let media = match data {
-                PlaylistData::Media(m) => m,
-                PlaylistData::Master(_) => return Err("Resumed URL is a Master Playlist.".to_string()),
-            };
-
-            update_job_after_refresh(&state, &job_id, &media, &headers).await?;
-            (media, true, Some(content))
-        },
-        Err(e) => {
-            // --- PHASE 2: FALLBACK TO SAVED FILE ---
-            write_job_log(&job_id, LogCategory::General, LogLevel::Warning, &format!("Refresh failed ({}), attempting fallback to local M3U8...", e)).await;
-            let backup_path = fs_utils::get_job_m3u8_backup_file_path(&job_id)?;
-            let saved_content = fs_utils::read_text_from_file_async(&backup_path).await?;
-            let data = m3u8_utils::parse_m3u8_content(&saved_content, &original_url).await
-                .map_err(|e| format!("Failed to parse local backup: {}", e))?;
-
-            let media = match data {
-                PlaylistData::Media(m) => m,
-                PlaylistData::Master(_) => return Err("Saved backup is a Master Playlist.".to_string()),
-            };
-
-            (media, false, None)
-        }
-    };
-
-    // --- INTERMEDIATE: Update Backup (If Fresh) ---
-    if should_save_backup {
-        if let Some(content) = content_to_save {
-            fs_utils::save_m3u8_content(&job_id, &content).await.ok();
-        }
+    // Fetch/Fallback Audio
+    let mut audio_media: Option<M3U8MediaPlaylist> = None;
+    if let Some(ref a_url) = audio_url {
+        audio_media = Some(fetch_or_fallback_playlist(&job_id, a_url, TrackType::Audio, &headers).await?);
     }
 
-    // --- PHASE 3: Hand off to the Engine ---
+    // Update state to handle the combined segment total, if your function needs it
+    update_job_after_refresh(&state, &job_id, &video_media, &headers).await?; 
+
+    // Hand off to the Engine
     let download_folder = fs_utils::get_download_dir(&job_id)?;
     let save_to_file = path_utils::join(save_folder, file_name);
     fs_utils::ensure_directory_exists_async(&download_folder).await?;
+    
     download_services::start_download_task(
         job_id,
         headers,
         save_to_file,
-        media_data,
+        video_media,
+        audio_media,
         state
     ).await
 }
@@ -124,11 +177,13 @@ pub async fn delete_job(
     job_id: String, 
     state: State<'_, AppState>
 ) -> Result<(), String> {
+    // Stop any active downloads/merges
     if let Some(token) = state.active_tasks.get(&job_id) {
         token.cancel();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
+    // Remove from memory and save state
     state.with_jobs_mut(|jobs| {
         if let Some(index) = jobs.iter().position(|j| j.id == job_id) {
             jobs.remove(index);
@@ -140,23 +195,21 @@ pub async fn delete_job(
 
     save_jobs_data(&state).await?;
 
-    if let Ok(download_folder) = fs_utils::get_download_dir(&job_id) {
-        if download_folder.exists() {
-            if let Err(e) = fs_utils::remove_dir_all_async(&download_folder).await {
+    if let Ok(download_dir) = fs_utils::get_download_dir(&job_id) {
+        if download_dir.exists() {
+            if let Err(e) = fs_utils::remove_dir_all_async(&download_dir).await {
                 println!("Warning: Could not delete temp folder for {}: {}", job_id, e);
             }
         }
     }
 
-    for category in LogCategory::ALL {
-        // Notice we use .as_str() here now!
-        if let Ok(log_file) = fs_utils::get_job_log_file_path(&job_id, category) {
-            let _ = fs_utils::remove_file_async(&log_file).await;
+    // Delete the job directory (Logs, M3U8 Backups)
+    if let Ok(job_dir) = fs_utils::get_job_dir(&job_id) {
+        if job_dir.exists() {
+            if let Err(e) = fs_utils::remove_dir_all_async(&job_dir).await {
+                println!("Warning: Could not delete job directory for {}: {}", job_id, e);
+            }
         }
-    }
-
-    if let Ok(backup_file) = fs_utils::get_job_m3u8_backup_file_path(&job_id) {
-        let _ = fs_utils::remove_file_async(&backup_file).await;
     }
 
     Ok(())
@@ -204,14 +257,16 @@ pub async fn write_job_log(job_id: &str, category: LogCategory, level: LogLevel,
 
 async fn init_job_state(
     state: &AppState,
-    url: &str,
+    video_url: String,
+    audio_url: Option<String>,
     headers: &HashMap<String, String>,
     save_folder: &str,
     file_name: &str,
     total_segments: u32
 ) -> Result<String, String> {
     let job = DownloadJob::new(
-        url.to_string(),
+        video_url,
+        audio_url,
         headers.clone(),
         save_folder.to_string(),
         file_name.to_string(),

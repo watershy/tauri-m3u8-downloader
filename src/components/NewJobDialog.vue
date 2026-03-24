@@ -29,9 +29,11 @@ const { settings, loadSettings } = useSettings();
 
 const { 
     // State
-    videoUrl, headers, headerOptions, saveFilename, fileExtension, saveFolder,
-    mediaChecked, loadingMedia, loadingDownload, errorMessage, hasResolution, resolutions, selectedResolution, totalSegments,
-    extensionOptions,
+    m3u8Url, headers, headerOptions, saveFilename, fileExtension, saveFolder,
+    mediaChecked, loadingMedia, loadingDownload, errorMessage,
+    totalSegments, extensionOptions,
+    hasResolution, resolutions, selectedResolution,
+    hasAudio, audios, selectedAudio,
     // Actions
     resetForm, checkMediaMetadata, validateAndCheckFileStatus, submitJob, addHeader, removeHeader
 } = useNewJob();
@@ -133,7 +135,7 @@ const executeJobCreation = async (overwrite: boolean) => {
         <div class="form-container">
             <div class="input-group">
                 <label>Video URL:</label>
-                <InputText v-model="videoUrl" placeholder="https://..." class="full-width" />
+                <InputText v-model="m3u8Url" placeholder="https://..." class="full-width" />
             </div>
 
             <div class="input-group">
@@ -190,6 +192,10 @@ const executeJobCreation = async (overwrite: boolean) => {
                 <div class="input-group" v-if="hasResolution">
                     <label>Available Resolutions:</label>
                     <Select v-model="selectedResolution" :options="resolutions" optionLabel="label" placeholder="Select a resolution" class="w-full" />
+                </div>
+                <div class="input-group" v-if="hasAudio">
+                    <label>Audio Track:</label>
+                    <Select v-model="selectedAudio" :options="audios" optionLabel="label" placeholder="Select an audio track" class="w-full" />
                 </div>
 
                 <div class="input-group">

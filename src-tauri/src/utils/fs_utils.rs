@@ -9,8 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncSeekExt, SeekFrom};
 use tauri::api::path::download_dir;
 use directories::ProjectDirs;
 use crate::constants;
-use crate::types::DownloadJob;
-use crate::types::LogCategory;
+use crate::types::{DownloadJob, LogCategory, TrackType};
 use super::LogErr;
 use super::IntoString;
 
@@ -56,8 +55,12 @@ pub fn get_job_log_file_path(job_id: &str, log_category: LogCategory) -> Result<
     Ok(get_job_dir(job_id)?.join(format!("{}_{}.log", job_id, log_category.as_str())))
 }
 
-pub fn get_job_m3u8_backup_file_path(job_id: &str) -> Result<PathBuf, String> {
-    Ok(get_job_dir(job_id)?.join(format!("{}.m3u8", job_id)))
+pub fn get_job_m3u8_backup_file_path(job_id: &str, track_type: TrackType) -> Result<PathBuf, String> {
+        let suffix = match track_type {
+        TrackType::Video => "_video.m3u8",
+        TrackType::Audio => "_audio.m3u8",
+    };
+    Ok(get_job_dir(job_id)?.join(format!("{}{}.m3u8", job_id, suffix)))
 }
 
 pub fn get_settings_file_path() -> Result<PathBuf, String> {
@@ -71,6 +74,10 @@ pub fn get_download_dir(job_id: &str) -> Result<PathBuf, String> {
     let base_temp = get_env_temp_dir()?;
     let job_path = base_temp.join(job_id);
     ensure_directory_exists(&job_path)?;
+    let video_path = job_path.join("video");
+    let audio_path: PathBuf = job_path.join("audio");
+    ensure_directory_exists(&video_path)?;
+    ensure_directory_exists(&audio_path)?;
     Ok(job_path)
 }
 
@@ -339,8 +346,8 @@ pub fn load_jobs_from_disk()-> Vec<DownloadJob> {
     }
 }
 
-pub async fn save_m3u8_content(job_id: &str, content: &str) -> Result<String, String> {
-    let path = get_job_m3u8_backup_file_path(job_id)?;
+pub async fn save_m3u8_content(job_id: &str, content: &str, track_type: TrackType) -> Result<String, String> {
+    let path = get_job_m3u8_backup_file_path(job_id, track_type)?;
     write_file_async(&path, content).await?;
     Ok(path.to_string())
 }

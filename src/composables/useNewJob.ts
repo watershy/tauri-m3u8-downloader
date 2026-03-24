@@ -1,14 +1,14 @@
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/tauri';
 
-export interface Resolution {
+export interface DropdownOption {
     label: string;
     value: any;
 }
 
 export function useNewJob() {
     // --- Form State ---
-    const videoUrl = ref('');
+    const m3u8Url = ref('');
     const headers = ref([{ name: 'Referer', value: '' }]);
 
     const headerOptions = ref([
@@ -27,9 +27,15 @@ export function useNewJob() {
     const loadingMedia = ref(false);
     const loadingDownload = ref(false);
     const errorMessage = ref('');
+
     const hasResolution = ref(false);
-    const resolutions = ref<Resolution[]>([]);
+    const resolutions = ref<DropdownOption[]>([]);
     const selectedResolution = ref<any>(null);
+
+    const hasAudio = ref(false);
+    const audios = ref<DropdownOption[]>([]);
+    const selectedAudio = ref<any>(null);
+
     const totalSegments = ref(0);
 
     const extensionOptions = ref([
@@ -49,7 +55,7 @@ export function useNewJob() {
     };
 
     const resetForm = (defaultFolder: string) => {
-        videoUrl.value = '';
+        m3u8Url.value = '';
         errorMessage.value = '';
         mediaChecked.value = false;
         resolutions.value = [];
@@ -75,9 +81,9 @@ export function useNewJob() {
         }
 
         try {
-            console.log("Checking media:", videoUrl.value);
+            console.log("Checking media:", m3u8Url.value);
             const result = await invoke<any>('check_media', {
-                videoUrl: videoUrl.value,
+                m3u8Url: m3u8Url.value,
                 httpHeaders: httpHeaders
             });
 
@@ -117,6 +123,22 @@ export function useNewJob() {
                     resolutions.value = [];
                 }
 
+                if (result.audios && result.audios.length > 0) {
+                    hasAudio.value = true;
+                    audios.value = result.audios.map((audio: any) => {
+                        // Display "Name (Language)" e.g. "English stereo (en)"
+                        const labelText = audio.language && audio.language !== "Unknown" 
+                            ? `${audio.name} (${audio.language})` 
+                            : audio.name || "Default Audio";
+                        return { label: labelText, value: audio };
+                    });
+                    // Auto-select the first audio track
+                    selectedAudio.value = audios.value[0];
+                } else {
+                    hasAudio.value = false;
+                    audios.value = [];
+                }
+
                 mediaChecked.value = true;
             } else {
                 errorMessage.value = result.message || "Unknown backend error.";
@@ -136,7 +158,7 @@ export function useNewJob() {
     const validateAndCheckFileStatus = async (): Promise<string> => {
         errorMessage.value = "";
 
-        if (!videoUrl.value) { errorMessage.value = "Please enter a video URL."; return "Error"; }
+        if (!m3u8Url.value) { errorMessage.value = "Please enter a video URL."; return "Error"; }
         if (!saveFolder.value) { errorMessage.value = "Please select a download folder."; return "Error"; }
         if (!saveFilename.value.trim()) { errorMessage.value = "Please enter a filename."; return "Error"; }
 
@@ -162,16 +184,22 @@ export function useNewJob() {
             }
         }
 
-        let finalDownloadUrl = videoUrl.value;
+        let finalDownloadUrl = m3u8Url.value;
         if (hasResolution.value && selectedResolution.value) {
             finalDownloadUrl = selectedResolution.value.value.uri;
+        }
+
+        let finalAudioUrl = null;
+        if (hasAudio.value && selectedAudio.value) {
+            finalAudioUrl = selectedAudio.value.value.uri;
         }
 
         const finalFileName = `${saveFilename.value}.${fileExtension.value}`;
 
         try {
             const result = await invoke<any>('create_job', {
-                downloadUrl: finalDownloadUrl.trim(),
+                videoUrl: finalDownloadUrl.trim(),
+                audioUrl: finalAudioUrl ? finalAudioUrl.trim() : null,
                 saveFolder: saveFolder.value.trim(),
                 fileName: finalFileName,
                 httpHeaders: httpHeaders,
@@ -191,10 +219,11 @@ export function useNewJob() {
 
     return {
         // State
-        videoUrl, headers, headerOptions, saveFilename, fileExtension, saveFolder,
-        mediaChecked, loadingMedia, loadingDownload, errorMessage, hasResolution, resolutions, selectedResolution, totalSegments,
-        extensionOptions,
-        
+        m3u8Url, headers, headerOptions, saveFilename, fileExtension, saveFolder,
+        mediaChecked, loadingMedia, loadingDownload, errorMessage,
+        totalSegments, extensionOptions,
+        hasResolution, resolutions, selectedResolution,
+        hasAudio, audios, selectedAudio,
         // Actions
         resetForm,
         checkMediaMetadata,

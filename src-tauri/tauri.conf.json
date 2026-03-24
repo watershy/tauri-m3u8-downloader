@@ -86,11 +86,11 @@
         },
         "windows": [
             {
-                "fullscreen": false,
-                "height": 600,
-                "resizable": true,
                 "title": "M3U8 Downloader",
-                "width": 960
+                "maximized": true,
+                "width": 960,
+                "height": 600,
+                "resizable": true
             }
         ]
     }

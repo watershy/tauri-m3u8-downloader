@@ -5,7 +5,8 @@ use crate::services::job_services;
 
 #[tauri::command]
 pub async fn create_job(
-    download_url: String,
+    video_url: String,
+    audio_url: Option<String>,
     save_folder: String,
     file_name: String,
     http_headers: std::collections::HashMap<String, String>,
@@ -13,7 +14,8 @@ pub async fn create_job(
 ) -> Result<CreateJobResult, String> {
     let state_owned = app_state.inner().clone();
     job_services::create_job(
-        download_url,
+        video_url,
+        audio_url,
         http_headers,
         save_folder,
         file_name,
@@ -37,13 +39,12 @@ pub async fn resume_job(
 ) -> Result<(), String> {
     let job_data = app_state.with_jobs(|jobs| {
         let job = jobs.iter().find(|j| j.id == job_id).ok_or("Job not found".to_string())?;
-
         if !job.status.can_resume() {
             return Ok::<_, String>(None);
         }
-
         Ok(Some((
-            job.m3u8_url.clone(),
+            job.video_url.clone(),
+            job.audio_url.clone(),
             job.save_folder.clone(),
             job.file_name.clone(),
             job.http_headers.clone()
@@ -51,11 +52,12 @@ pub async fn resume_job(
     })??;
 
     match job_data {
-        Some((url, save_folder, file_name, headers)) => {
+        Some((video_url, audio_url, save_folder, file_name, headers)) => {
             let state_owned = app_state.inner().clone();
             job_services::resume_job(
                 job_id,
-                url,
+                video_url,
+                audio_url,
                 save_folder,
                 file_name,
                 headers,
