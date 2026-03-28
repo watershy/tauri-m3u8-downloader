@@ -2,7 +2,15 @@
 
 A blazing-fast, cross-platform desktop application for downloading and merging M3U8 video streams. Built with **Tauri**, **Rust**, and **Vue.js**.
 
-![App Demo Video/GIF goes here](Drag_and_drop_your_video_file_here_in_github)
+## Demo
+
+### Standard Download
+https://github.com/user-attachments/assets/2e76340b-7372-4f0a-927a-2a6964390dd0
+
+### Bypassing 403 Errors (Custom Headers)
+Many streaming servers protect their videos by requiring specific `Referer` or `User-Agent` headers. M3U8 Downloader lets you inject custom HTTP headers directly into the request to bypass these restrictions and download previously inaccessible streams.
+
+https://github.com/user-attachments/assets/7a5cdf05-b063-41e0-b2d6-4f5394c35502
 
 ## ✨ Features
 * **Lightning Fast:** Downloads video segments concurrently using an optimized Rust backend.
