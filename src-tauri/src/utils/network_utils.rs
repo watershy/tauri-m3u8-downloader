@@ -6,34 +6,44 @@ use zstd::stream::decode_all;
 
 use crate::constants;
 
-pub async fn fetch_http_content(url: &str, headers: &HashMap<String, String>) -> Result<String, String> {
+pub async fn fetch_http_text(url: &str, headers: &HashMap<String, String>) -> Result<String, String> {
+    let response = send_request(url, headers).await?;
+    if response.status().is_success() {
+        extract_text_body(response).await
+    } else {
+        Err(format!("Failed to fetch URL due to non-success status code: {}.", response.status()))
+    }
+}
+
+pub async fn fetch_http_bytes(url: &str, headers: &HashMap<String, String>) -> Result<Vec<u8>, String> {
+    let response = send_request(url, headers).await?;
+    if response.status().is_success() {
+        let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+        Ok(bytes.to_vec())
+    } else {
+        Err(format!("Failed to fetch bytes due to non-success status code: {}.", response.status()))
+    }
+}
+
+async fn send_request(url: &str, headers: &HashMap<String, String>) -> Result<reqwest::Response, String> {
     let client = Client::new();
-    let mut req_headers: reqwest::header::HeaderMap = reqwest::header::HeaderMap::new();
+    let mut req_headers = HeaderMap::new();
     req_headers.insert(USER_AGENT, HeaderValue::from_static(constants::USER_AGENT_VALUE));
     req_headers.insert(ACCEPT, HeaderValue::from_static(constants::ACCEPT_VALUE));
     req_headers.insert(ACCEPT_ENCODING, HeaderValue::from_static(constants::ACCEPT_ENCODING_VALUE));
     for (header_name, header_value) in headers {
-        let header_name_bytes = header_name.as_bytes();
-        if let Ok(h_name) = HeaderName::from_bytes(header_name_bytes) {
+        if let Ok(h_name) = HeaderName::from_bytes(header_name.as_bytes()) {
             if let Ok(h_value) = HeaderValue::from_str(header_value) {
                 req_headers.insert(h_name, h_value);
             }
         }
     }
 
-    let response = client.get(url)
+    client.get(url)
         .headers(req_headers)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
-
-    print_headers(response.headers());
-    if response.status().is_success() {
-        extract_text_body(response).await
-    } else {
-        let error_message: String = format!("Failed to fetch URL due to non-success status code: {}.", response.status());
-        Err(error_message)
-    }
+        .map_err(|e| e.to_string())
 }
 
 fn print_headers(headers: &HeaderMap) {

@@ -10,14 +10,14 @@ pub async fn check_media(
     active_paths: &[PathBuf],
 ) -> Result<CheckMediaResult, String> {
     let suggested_file_name = fs_utils::resolve_unique_filename(&save_folder, url, active_paths);
-    let m3u8_content = match network_utils::fetch_http_content(&url, &headers).await {
+    let m3u8_content = match network_utils::fetch_http_text(&url, &headers).await {
         Ok(content) => content,
         Err(e) => {
             return Ok(CheckMediaResult::failure(e));
         }
     };
 
-    match m3u8_utils::parse_m3u8_content(&m3u8_content, &url).await {
+    match m3u8_utils::parse_m3u8_content(&m3u8_content, &url, &headers).await {
         Ok(data) => match data {
             PlaylistData::Master(master_data) => {
                 let audios: Vec<AudioOption> = master_data.media_renditions

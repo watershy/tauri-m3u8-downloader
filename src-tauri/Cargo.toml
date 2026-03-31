@@ -39,6 +39,9 @@ directories = { version = "5.0" }
 tokio-util = { version = "0.7", features = ["full"] } 
 dashmap = { version = "5.5" }
 rodio = { version = "0.17" }
+aes = { version = "0.8" }
+cbc = { version = "0.1" }
+hex = { version = "0.4" }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem and the built-in dev server is disabled.

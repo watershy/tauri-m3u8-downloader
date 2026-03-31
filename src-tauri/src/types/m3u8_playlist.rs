@@ -1,7 +1,8 @@
 
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use url::Url;
-use crate::utils::string_utils;
+use crate::utils::{string_utils, network_utils};
 use super::ResolutionOption;
 
 pub enum PlaylistType {
@@ -191,11 +192,13 @@ pub struct MediaSegment {
     pub is_discontinuity: bool,     // No use
     pub downloaded: bool,           // Indicate if the segment is downloaded or not
     pub size_bytes: u64,            // Size of segment file (after download)
+    pub key_bytes: Option<Vec<u8>>,
+    pub iv: Option<String>,
 }
 
 impl M3U8MediaPlaylist {
     /// Parses the content of a media-type M3U8 playlist
-    pub fn parse(content: &str, m3u8_url: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn parse(content: &str, m3u8_url: &str, headers: &HashMap<String, String>) -> Result<Self, Box<dyn std::error::Error>> {
         let mut playlist = M3U8MediaPlaylist {
             version: None,
             target_duration: 0,
@@ -210,6 +213,8 @@ impl M3U8MediaPlaylist {
 
         let base_url = Url::parse(m3u8_url).map_err(|e| format!("Invalid base URL: {}", e))?;
         let mut current_segment: Option<MediaSegment> = None;
+        let mut current_key_bytes: Option<Vec<u8>> = None;
+        let mut current_iv: Option<String> = None;
         let mut index = 0;
         for line in content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()) {
             if line.starts_with("#EXT-X-VERSION") {
@@ -220,6 +225,21 @@ impl M3U8MediaPlaylist {
                 playlist.media_sequence = Some(line.split(':').nth(1).unwrap().parse()?);
             } else if line.starts_with("#EXT-X-PLAYLIST-TYPE") {
                 playlist.playlist_type = Some(line.split(':').nth(1).unwrap().to_string());
+            } else if line.starts_with("#EXT-X-KEY") {
+                let attributes = string_utils::parse_attributes(line)?;
+                if let Some(method) = attributes.get("METHOD") {
+                    if method == "NONE" {
+                        current_key_bytes = None;
+                        current_iv = None;
+                    } else {
+                        // Grab the URI and resolve it to a full URL
+                        let uri_str = attributes.get("URI").ok_or("EXT-X-KEY missing URI")?;
+                        let full_key_uri = base_url.join(uri_str)?.to_string();
+                        let bytes = network_utils::fetch_http_bytes(&full_key_uri, headers).await?;
+                        current_key_bytes = Some(bytes);
+                        current_iv = attributes.get("IV").map(|s| s.to_string());
+                    }
+                }
             } else if line.starts_with("#EXT-X-MAP") {
                 let attributes = string_utils::parse_attributes(line)?; 
                 if let Some(uri_str) = attributes.get("URI") {
@@ -231,6 +251,8 @@ impl M3U8MediaPlaylist {
                         is_discontinuity: false,
                         downloaded: false,
                         size_bytes: 0,
+                        key_bytes: current_key_bytes.clone(),
+                        iv: current_iv.clone(),
                     });
                 }
             } else if line.starts_with("#EXTINF") {
@@ -250,6 +272,8 @@ impl M3U8MediaPlaylist {
                     is_discontinuity: false,
                     downloaded: false,
                     size_bytes: 0,
+                    key_bytes: current_key_bytes.clone(),
+                    iv: current_iv.clone(),
                 });
                 index = index + 1;
             } else if line.starts_with("#EXT-X-DISCONTINUITY") {

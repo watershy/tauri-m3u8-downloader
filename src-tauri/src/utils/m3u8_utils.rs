@@ -1,10 +1,11 @@
+use std::collections::HashMap;
 use crate::types::*;
 
-pub async fn parse_m3u8_content(m3u8_content: &str, url: &str)-> Result<PlaylistData, String> {
+pub async fn parse_m3u8_content(m3u8_content: &str, url: &str, headers: &HashMap<String, String>)-> Result<PlaylistData, String> {
     //println!("M3U8 file content: {}", m3u8_content);
     match get_playlist_type(&m3u8_content) {
         PlaylistType::Master => parse_master_playlist(&m3u8_content, url).await.map(PlaylistData::Master),
-        PlaylistType::Media => parse_media_playlist(&m3u8_content, url).await.map(PlaylistData::Media),
+        PlaylistType::Media => parse_media_playlist(&m3u8_content, url, headers).await.map(PlaylistData::Media),
         PlaylistType::Unknown => Err("Unknown or unsupported M3U8 file format".to_string()),
     }
 }
@@ -24,9 +25,9 @@ pub async fn parse_master_playlist(content: &str, url: &str) -> Result<M3U8Maste
         .map_err(|e| format!("Failed to parse master playlist from {}: {}", url, e))
 }
 
-pub async fn parse_media_playlist(content: &str, url: &str) -> Result<M3U8MediaPlaylist, String> {
-    M3U8MediaPlaylist::parse(content, url)
-        .map_err(|e| format!("Failed to parse media playlist: {}", e))
+pub async fn parse_media_playlist(content: &str, url: &str, headers: &HashMap<String, String>) -> Result<M3U8MediaPlaylist, String> {
+    M3U8MediaPlaylist::parse(content, url, headers)
+        .await.map_err(|e| format!("Failed to parse media playlist: {}", e))
 }
 
 // Helper: Scans for the MPEG-TS sync byte (0x47) repeating every 188 bytes

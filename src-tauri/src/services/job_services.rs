@@ -13,8 +13,8 @@ pub async fn create_job(
     state: AppState
 ) -> Result<String, String> { // Returns Job ID on success
     // 1. Fetch & Parse M3U8
-    let video_m3u8_content = network_utils::fetch_http_content(&video_url, &headers).await?;
-    let video_media_data: M3U8MediaPlaylist = match m3u8_utils::parse_m3u8_content(&video_m3u8_content, &video_url).await? {
+    let video_m3u8_content = network_utils::fetch_http_text(&video_url, &headers).await?;
+    let video_media_data: M3U8MediaPlaylist = match m3u8_utils::parse_m3u8_content(&video_m3u8_content, &video_url, &headers).await? {
         PlaylistData::Master(_) => return Err("Cannot download Master playlist directly".to_string()),
         PlaylistData::Media(d) => d,
     };
@@ -23,8 +23,8 @@ pub async fn create_job(
     let mut audio_m3u8_content: Option<String> = None;
     let mut audio_media_data: Option<M3U8MediaPlaylist> = None;
     if let Some(ref a_url) = audio_url {
-        let content = network_utils::fetch_http_content(a_url, &headers).await?;
-        match m3u8_utils::parse_m3u8_content(&content, a_url).await? {
+        let content = network_utils::fetch_http_text(a_url, &headers).await?;
+        match m3u8_utils::parse_m3u8_content(&content, a_url, &headers).await? {
             PlaylistData::Master(_) => return Err("Audio URL points to a Master Playlist".to_string()),
             PlaylistData::Media(d) => {
                 audio_media_data = Some(d);
@@ -96,11 +96,11 @@ async fn fetch_or_fallback_playlist(
 ) -> Result<M3U8MediaPlaylist, String> {
     let track_name = track_type.as_str();
 
-    match network_utils::fetch_http_content(url, headers).await {
+    match network_utils::fetch_http_text(url, headers).await {
         Ok(content) => {
             write_job_log(job_id, LogCategory::General, LogLevel::Info, &format!("Resume: Refreshed {} playlist from server.", track_name)).await;
 
-            let data = m3u8_utils::parse_m3u8_content(&content, url).await
+            let data = m3u8_utils::parse_m3u8_content(&content, url, headers).await
                 .map_err(|e| format!("Parsed invalid {} data from refresh: {}", track_name, e))?;
             let media = match data {
                 PlaylistData::Media(m) => m,
@@ -119,7 +119,7 @@ async fn fetch_or_fallback_playlist(
             // Note: Update this to pass TrackType into your fs_utils!
             let backup_path = fs_utils::get_job_m3u8_backup_file_path(job_id, track_type)?;
             let saved_content = fs_utils::read_text_from_file_async(&backup_path).await?;
-            let data = m3u8_utils::parse_m3u8_content(&saved_content, url).await
+            let data = m3u8_utils::parse_m3u8_content(&saved_content, url, headers).await
                 .map_err(|e| format!("Failed to parse local {} backup: {}", track_name, e))?;
             
             let media = match data {

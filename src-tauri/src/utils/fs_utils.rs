@@ -57,8 +57,8 @@ pub fn get_job_log_file_path(job_id: &str, log_category: LogCategory) -> Result<
 
 pub fn get_job_m3u8_backup_file_path(job_id: &str, track_type: TrackType) -> Result<PathBuf, String> {
         let suffix = match track_type {
-        TrackType::Video => "_video.m3u8",
-        TrackType::Audio => "_audio.m3u8",
+        TrackType::Video => "_video",
+        TrackType::Audio => "_audio",
     };
     Ok(get_job_dir(job_id)?.join(format!("{}{}.m3u8", job_id, suffix)))
 }

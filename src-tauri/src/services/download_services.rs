@@ -193,13 +193,13 @@ fn spawn_download_workers(
         let mut download_queue = Vec::new();
 
         if let Some(init_seg) = media_data.init_map_file {
-            download_queue.push((init_seg.url, "init.mp4".to_string()));
+            download_queue.push((init_seg, "init.mp4".to_string()));
         }
         for (index, segment) in media_data.segments.into_iter().enumerate() {
-            download_queue.push((segment.url, format!("seq_{:05}.{}", index, extension)));
+            download_queue.push((segment, format!("seq_{:05}.{}", index, extension)));
         }
 
-        for (url, file_name) in download_queue {
+        for (segment, file_name) in download_queue {
             if cancel_token.is_cancelled() {
                 break;      // Stop queuing new tasks immediately
             }
@@ -222,11 +222,10 @@ fn spawn_download_workers(
 
             tokio::spawn(async move {
                 let _permit = owned_permit;
-
                 let file_path = folder.join(&file_name);
                 let result = download_file_with_retry(
                     &client,
-                    &url,
+                    &segment,
                     &file_path,
                     &headers,
                     is_ts,
@@ -428,7 +427,7 @@ async fn finalize_merge(
 
 pub async fn download_file_with_retry(
     client: &reqwest::Client,
-    url: &str,
+    segment: &MediaSegment,
     final_path: &PathBuf,
     headers: &HashMap<String, String>,
     is_ts: bool,
@@ -449,7 +448,7 @@ pub async fn download_file_with_retry(
 
     // 3. RETRY LOOP
     for attempt in 1..=MAX_RETRIES {
-        match perform_single_download(client, url, &temp_path, headers, is_ts, &progress_tx).await {
+        match perform_single_download(client, segment, &temp_path, headers, is_ts, &progress_tx).await {
             Ok(_) => {
                 // Atomic Rename on Success: .part -> .ts
                 fs_utils::rename_file_async(&temp_path, final_path).await?;
@@ -472,14 +471,14 @@ pub async fn download_file_with_retry(
 
 async fn perform_single_download(
     client: &reqwest::Client,
-    url: &str,
+    segment: &MediaSegment,
     temp_path: &PathBuf,
     headers: &HashMap<String, String>,
     is_ts: bool,
     progress_tx: &mpsc::Sender<DownloadProgress>,
 ) -> Result<(), String> {
     // A. Build Request
-    let mut request = client.get(url);
+    let mut request = client.get(&segment.url);
     for (k, v) in headers {
         request = request.header(k, v);
     }
@@ -493,37 +492,48 @@ async fn perform_single_download(
     // C. Create Temp File
     let mut file = fs_utils::create_file_async(temp_path).await?;
 
-    // D. Stream Loop with Header Stripping
-    let mut stream = response.bytes_stream();
-    let mut buffer: Vec<u8> = Vec::new();
-    let mut header_processed = false;
+    if let Some(key) = &segment.key_bytes {
+        // 1. Download the whole encrypted file into memory
+        let mut encrypted_buffer = response.bytes().await.map_err(|e| e.to_string())?.to_vec();
+        
+        // 2. Prepare IV and Decrypt
+        let iv = crypto_utils::get_iv(&segment.iv, segment.sequence)?;
+        let decrypted_data = crypto_utils::decrypt_aes128(&mut encrypted_buffer, key, &iv)?;
 
-    while let Some(item) = stream.next().await {
-        let chunk = item.map_err(|e| e.to_string())?;
-
-        if !is_ts || header_processed {
-            file.write_all(&chunk).await.map_err(|e| e.to_string())?;
-            let _ = progress_tx.send(DownloadProgress::BytesDownloaded(chunk.len() as u64)).await;
-        } else {
-            buffer.extend_from_slice(&chunk);
-            if buffer.len() >= 1024 {
-                let offset = m3u8_utils::detect_ts_sync_offset(&buffer);
-                file.write_all(&buffer[offset..]).await.map_err(|e| e.to_string())?;
-                let written_len = buffer.len().saturating_sub(offset);
-                let _ = progress_tx.send(DownloadProgress::BytesDownloaded(written_len as u64)).await;
-
-                header_processed = true;
-                buffer.clear();
-                buffer.shrink_to_fit();
+        // 3. Sync offset check and write to disk
+        let offset = if is_ts { m3u8_utils::detect_ts_sync_offset(decrypted_data) } else { 0 };
+        file.write_all(&decrypted_data[offset..]).await.map_err(|e| e.to_string())?;
+        let _ = progress_tx.send(DownloadProgress::BytesDownloaded((decrypted_data.len() - offset) as u64)).await;
+    } else {
+        // Stream Loop with Header Stripping
+        let mut stream = response.bytes_stream();
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut header_processed = false;
+        while let Some(item) = stream.next().await {
+            let chunk = item.map_err(|e| e.to_string())?;
+            if !is_ts || header_processed {
+                file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+                let _ = progress_tx.send(DownloadProgress::BytesDownloaded(chunk.len() as u64)).await;
+            } else {
+                buffer.extend_from_slice(&chunk);
+                if buffer.len() >= 1024 {
+                    let offset = m3u8_utils::detect_ts_sync_offset(&buffer);
+                    file.write_all(&buffer[offset..]).await.map_err(|e| e.to_string())?;
+                    let written_len = buffer.len().saturating_sub(offset);
+                    let _ = progress_tx.send(DownloadProgress::BytesDownloaded(written_len as u64)).await;
+                    header_processed = true;
+                    buffer.clear();
+                    buffer.shrink_to_fit();
+                }
             }
         }
-    }
 
-    // Edge Case: If stream ended but was smaller than our check limit (e.g. tiny file)
-    if is_ts && !header_processed && !buffer.is_empty() {
-        let offset = m3u8_utils::detect_ts_sync_offset(&buffer);
-        file.write_all(&buffer[offset..]).await.map_err(|e| e.to_string())?;
-        let _ = progress_tx.send(DownloadProgress::BytesDownloaded((buffer.len() - offset) as u64)).await;
+        // Edge Case: If stream ended but was smaller than our check limit (e.g. tiny file)
+        if is_ts && !header_processed && !buffer.is_empty() {
+            let offset = m3u8_utils::detect_ts_sync_offset(&buffer);
+            file.write_all(&buffer[offset..]).await.map_err(|e| e.to_string())?;
+            let _ = progress_tx.send(DownloadProgress::BytesDownloaded((buffer.len() - offset) as u64)).await;
+        }
     }
 
     // E. Flush to ensure safety
@@ -593,66 +603,6 @@ macro_rules! build_args {
         ]
     };
 }
-
-// async fn merge_strategy_binary(
-//     job_id: &str,
-//     base_folder: &PathBuf,
-//     files: &[PathBuf],
-//     save_to_file: &str,
-//     cancel_token: CancellationToken
-// ) -> Result<(), String> {
-//     write_job_log(job_id, LogCategory::Merge, LogLevel::Info, "Strategy: Binary Merge (Fragmented MP4)").await;
-
-//     let temp_merged_path = base_folder.join("temp_merged.mp4");
-
-//     fs_utils::concatenate_files(files, &temp_merged_path).await?;
-
-//     let args: Vec<String> = build_args!(
-//         "-hide_banner",
-//         "-y",
-//         "-i", temp_merged_path.to_string_lossy(),
-//         "-c", "copy",
-//         "-movflags", "+faststart",
-//         save_to_file
-//     );
-
-//     let result = run_ffmpeg_command(args, job_id, cancel_token).await;
-//     result
-// }
-
-// async fn merge_strategy_concat(
-//     job_id: &str,
-//     base_folder: &PathBuf,
-//     files: &[PathBuf],
-//     save_to_file: &str,
-//     cancel_token: CancellationToken,
-// ) -> Result<(), String> {
-//     write_job_log(job_id, LogCategory::Merge, LogLevel::Info, "Strategy: FFmpeg Concat Demuxer").await;
-
-//     // 1. Generate List
-//     let list_path = base_folder.join("segments.txt");
-//     let content = files.iter()
-//         .map(|p| {
-//             // FFmpeg prefers forward slashes, even on Windows
-//             let path_str = p.to_string_lossy().replace('\\', "/");
-//             format!("file '{}'\n", path_str)
-//         })
-//         .collect::<String>();
-
-//     fs_utils::write_file_async(&list_path, &content).await?;
-
-//     let args = build_args!(
-//         "-hide_banner",
-//         "-f", "concat",
-//         "-safe", "0",
-//         "-i", list_path.to_string_lossy(),
-//         "-c", "copy",
-//         "-movflags", "+faststart",
-//         "-y", save_to_file
-//     );
-
-//     run_ffmpeg_command(args, job_id, cancel_token).await
-// }
 
 async fn merge_media(
     job_id: &str,
