@@ -13,11 +13,13 @@ Many streaming servers protect their videos by requiring specific `Referer` or `
 https://github.com/user-attachments/assets/7a5cdf05-b063-41e0-b2d6-4f5394c35502
 
 ## ✨ Features
-* **Lightning Fast:** Downloads video segments concurrently using an optimized Rust backend.
-* **Smart Auto-Merge:** Automatically detects and merges `.ts` and `.m4s` segments into a clean `.mp4` using FFmpeg.
-* **Resilient:** Built-in retry logic for dropped segments and network hiccups.
-* **Pause & Resume:** Safely pause your downloads and resume them later without losing progress.
-* **Beautiful UI:** Clean, responsive Vue frontend with highly accurate, exponentially smoothed ETAs.
+* **High-Speed Concurrency:** A Rust backend downloads multiple video segments simultaneously to maximize your network bandwidth.
+* **Custom HTTP Headers:** Inject `Referer`, `Cookie`, or `User-Agent` headers to bypass 403 Forbidden errors on protected streams.
+* **On-the-Fly Decryption:** Automatically detects `#EXT-X-KEY` tags, fetches the keys, and decrypts AES-128 scrambled segments directly in memory.
+* **Auto-Merge:** Automatically stitches `.ts` and `.m4s` segments into a single, clean .mp4 file using FFmpeg.
+* **Pause & Resume:** Safely halt active downloads and resume them later without losing any downloaded data.
+* **Error Recovery:** Built-in retry logic automatically handles network hiccups and dropped segments.
+* **Responsive UI:** A clean Vue frontend featuring real-time progress tracking and exponentially smoothed ETAs.
 
 ## 🚀 Installation (Windows)
 
