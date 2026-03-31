@@ -41,22 +41,30 @@ Want to build it yourself or contribute? Here is how to run the project locally.
 
 ### Running Locally
 
-1. Clone the repository:
+1. **Clone the repository:**
+   ```bash
    git clone https://github.com/watershy/tauri-m3u8-downloader.git
    cd tauri-m3u8-downloader
+   ```
 
-2. Install frontend dependencies:
+2. **Install frontend dependencies:**
+   ```bash
    cd ui
    npm install
+   ```
 
-3. Run the development server:
+3. **Run the app in development mode:**
+   ```bash
    cargo tauri dev
+   ```
 
 ### Building for Production
-To build the final NSIS installer:
+**To build the final NSIS installer:**
+   ```bash
    cd ui && npm run build
    cd ..
    cargo tauri build
+   ```
 
 The compiled installer will be located in `src-tauri/target/release/bundle/nsis/`.
 
