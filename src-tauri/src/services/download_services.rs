@@ -185,7 +185,7 @@ fn spawn_download_workers(
 ) {
     let total_segments = media_data.total_segments;
     tokio::spawn(async move {
-        let client = reqwest::Client::new();
+        let client = network_utils::build_impersonating_client();
         let semaphore = Arc::new(Semaphore::new(10));
         let shared_headers = Arc::new(headers);
         let is_ts = media_data.init_map_file.is_none();
@@ -426,7 +426,7 @@ async fn finalize_merge(
 }
 
 pub async fn download_file_with_retry(
-    client: &reqwest::Client,
+    client: &wreq::Client,
     segment: &MediaSegment,
     final_path: &PathBuf,
     headers: &HashMap<String, String>,
@@ -470,7 +470,7 @@ pub async fn download_file_with_retry(
 }
 
 async fn perform_single_download(
-    client: &reqwest::Client,
+    client: &wreq::Client,
     segment: &MediaSegment,
     temp_path: &PathBuf,
     headers: &HashMap<String, String>,
@@ -478,10 +478,8 @@ async fn perform_single_download(
     progress_tx: &mpsc::Sender<DownloadProgress>,
 ) -> Result<(), String> {
     // A. Build Request
-    let mut request = client.get(&segment.url);
-    for (k, v) in headers {
-        request = request.header(k, v);
-    }
+    let request = client.get(&segment.url);
+    let request = network_utils::apply_browser_headers(request, headers);
 
     // B. Send Request
     let response = request.send().await.map_err(|e| e.to_string())?;

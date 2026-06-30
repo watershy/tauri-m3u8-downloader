@@ -1,10 +1,33 @@
 use std::collections::HashMap;
-use reqwest::Client;
-use reqwest::header::{ HeaderValue, USER_AGENT, ACCEPT, ACCEPT_ENCODING, HeaderName, HeaderMap };
+use wreq::header::HeaderMap;
 use std::io::Cursor;
 use zstd::stream::decode_all;
 
-use crate::constants;
+use crate::utils::network_utils;
+
+pub fn build_impersonating_client() -> wreq::Client {
+    wreq::Client::builder()
+        .emulation(wreq_util::Emulation::Chrome137)
+        .build()
+        .expect("CRITICAL: Failed to build wreq client. TLS backend is unavailable.")
+}
+
+/// Injects standard Chrome 137 headers and user-provided overrides into a RequestBuilder.
+pub fn apply_browser_headers(
+    mut request: wreq::RequestBuilder, 
+    headers: &HashMap<String, String>
+) -> wreq::RequestBuilder {
+    request = request.header(wreq::header::USER_AGENT, crate::constants::USER_AGENT_VALUE);
+    request = request.header(wreq::header::ACCEPT, crate::constants::ACCEPT_VALUE);
+    request = request.header(wreq::header::ACCEPT_LANGUAGE, crate::constants::ACCEPT_LANGUAGE_VALUE);
+    request = request.header(wreq::header::ACCEPT_ENCODING, crate::constants::ACCEPT_ENCODING_VALUE);
+
+    for (k, v) in headers {
+        request = request.header(k, v);
+    }
+
+    request
+}
 
 pub async fn fetch_http_text(url: &str, headers: &HashMap<String, String>) -> Result<String, String> {
     let response = send_request(url, headers).await?;
@@ -25,25 +48,11 @@ pub async fn fetch_http_bytes(url: &str, headers: &HashMap<String, String>) -> R
     }
 }
 
-async fn send_request(url: &str, headers: &HashMap<String, String>) -> Result<reqwest::Response, String> {
-    let client = Client::new();
-    let mut req_headers = HeaderMap::new();
-    req_headers.insert(USER_AGENT, HeaderValue::from_static(constants::USER_AGENT_VALUE));
-    req_headers.insert(ACCEPT, HeaderValue::from_static(constants::ACCEPT_VALUE));
-    req_headers.insert(ACCEPT_ENCODING, HeaderValue::from_static(constants::ACCEPT_ENCODING_VALUE));
-    for (header_name, header_value) in headers {
-        if let Ok(h_name) = HeaderName::from_bytes(header_name.as_bytes()) {
-            if let Ok(h_value) = HeaderValue::from_str(header_value) {
-                req_headers.insert(h_name, h_value);
-            }
-        }
-    }
-
-    client.get(url)
-        .headers(req_headers)
-        .send()
-        .await
-        .map_err(|e| e.to_string())
+async fn send_request(url: &str, headers: &HashMap<String, String>) -> Result<wreq::Response, String> {
+    let client = build_impersonating_client();
+    let request = client.get(url);
+    let request = apply_browser_headers(request, headers);
+    request.send().await.map_err(|e| e.to_string())
 }
 
 fn print_headers(headers: &HeaderMap) {
@@ -55,7 +64,7 @@ fn print_headers(headers: &HeaderMap) {
     }
 }
 
-async fn extract_text_body(response: reqwest::Response) -> Result<String, String> {
+async fn extract_text_body(response: wreq::Response) -> Result<String, String> {
     let content_encoding = response.headers()
         .get("content-encoding")
         .and_then(|val| val.to_str().ok())
@@ -68,7 +77,6 @@ async fn extract_text_body(response: reqwest::Response) -> Result<String, String
         let decompressed_bytes = decode_all(Cursor::new(&bytes)).map_err(|e| e.to_string())?;
         String::from_utf8(decompressed_bytes).map_err(|e| e.to_string())
     } else {
-        // `reqwest.text()` will handle plain text, gzip, and brotli
         response.text().await.map_err(|e| e.to_string())
     }
 }
@@ -77,14 +85,12 @@ pub async fn validate_http_file_access(
     url: &str, 
     headers: &HashMap<String, String>
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
-    let mut request = client.get(url);
+    let client = build_impersonating_client();
 
-    for (k, v) in headers {
-        request = request.header(k, v);
-    }
-
+    let request = client.get(url);
+    let mut request = network_utils::apply_browser_headers(request, headers);
     request = request.header("Range", "bytes=0-0");
+
     let response = request.send().await.map_err(|e| e.to_string())?;
     if response.status().is_success() {
         Ok(())

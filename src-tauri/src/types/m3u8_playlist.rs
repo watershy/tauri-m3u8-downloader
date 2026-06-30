@@ -1,4 +1,3 @@
-
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -101,7 +100,6 @@ impl M3U8MasterPlaylist {
 
         Ok(playlist)
     }
-    
 
     fn parse_version(&mut self, line: &str) -> Result<(), Box<dyn std::error::Error>> {
         self.version = Some(line.split(':').nth(1).unwrap().parse()?);

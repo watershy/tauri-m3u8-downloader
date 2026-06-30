@@ -1,6 +1,6 @@
 [package]
 name = "m3u8-downloader"
-version = "0.2.0"
+version = "0.4.0"
 description = "A custom M3U8 video downloader"
 authors = ["you"]
 license = ""
@@ -42,6 +42,8 @@ rodio = { version = "0.17" }
 aes = { version = "0.8" }
 cbc = { version = "0.1" }
 hex = { version = "0.4" }
+wreq = { version = "5", features = ["stream"] }
+wreq-util = { version = "2" }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem and the built-in dev server is disabled.
