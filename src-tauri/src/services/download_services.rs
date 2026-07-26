@@ -477,14 +477,63 @@ async fn perform_single_download(
     is_ts: bool,
     progress_tx: &mpsc::Sender<DownloadProgress>,
 ) -> Result<(), String> {
-    // A. Build Request
-    let request = client.get(&segment.url);
-    let request = network_utils::apply_browser_headers(request, headers);
+    let mut target_url = segment.url.clone();
+    let mut response;
+    
+    // We clone the headers so we can modify them if a redirect occurs
+    let mut active_headers = headers.clone();
+    
+    let mut redirect_count = 0;
+    const MAX_REDIRECTS: u8 = 5;
 
-    // B. Send Request
-    let response = request.send().await.map_err(|e| e.to_string())?;
+    // A & B. Build and Send Request (with Manual Redirect Handling)
+    loop {
+        let request = client.get(&target_url);
+        let request = network_utils::apply_browser_headers(request, &active_headers);
+
+        response = request.send().await.map_err(|e| e.to_string())?;
+
+        // Handle 3xx Redirection natively
+        if response.status().is_redirection() {
+            if redirect_count >= MAX_REDIRECTS {
+                return Err(format!("Too many redirects for URL: {}", segment.url));
+            }
+
+            if let Some(location) = response.headers().get("location") {
+                if let Ok(loc_str) = location.to_str() {
+                    if loc_str.starts_with("http") {
+                        target_url = loc_str.to_string();
+                    } else if loc_str.starts_with('/') {
+                        // Basic relative URL fallback
+                        if let Some(idx) = target_url.find("://") {
+                            let offset = idx + 3;
+                            if let Some(path_idx) = target_url[offset..].find('/') {
+                                target_url = format!("{}{}", &target_url[..offset + path_idx], loc_str);
+                            } else {
+                                target_url = format!("{}{}", target_url, loc_str);
+                            }
+                        }
+                    } else {
+                        return Err(format!("Unsupported relative redirect: {}", loc_str));
+                    }
+                    
+                    // CRITICAL: When redirecting to a new CDN, strip the Host header.
+                    // Sending the old domain's Host header to a new server will cause a 403 or 404!
+                    active_headers.remove("Host");
+                    active_headers.remove("host");
+                    
+                    redirect_count += 1;
+                    continue;
+                }
+            }
+        }
+
+        // Break loop if status is not a redirect (e.g. 200 OK or hard error)
+        break;
+    }
+
     if !response.status().is_success() {
-        return Err(format!("HTTP Error: {}", response.status()));
+        return Err(format!("HTTP Error: {} for URL: {}", response.status(), target_url));
     }
 
     // C. Create Temp File

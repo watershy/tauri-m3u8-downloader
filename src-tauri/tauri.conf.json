@@ -7,8 +7,8 @@
         "withGlobalTauri": false
     },
     "package": {
-        "productName": "M3U8Downloader",
-        "version": "0.4.0"
+        "productName": "m3u8-downloader",
+        "version": "0.4.1"
     },
     "tauri": {
         "allowlist": {
